@@ -27,7 +27,7 @@ jobs:
         with:
           context: .
           file: ./Dockerfile.template
-          push: false
+          load: true
           tags: php-grpc:test-${{ matrix.php_version }}-${{ matrix.variant }}
           build-args: |
             PHP_VERSION=${{ matrix.php_version }}
