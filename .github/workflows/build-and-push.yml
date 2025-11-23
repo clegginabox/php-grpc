@@ -50,8 +50,8 @@ jobs:
           PHP_VERSIONS=$(jq -c '.php_versions' versions.json)
           VARIANTS=$(jq -c '.variants' versions.json)
 
-          # Create matrix combining versions and variants
-          MATRIX=$(jq -n \
+          # Create matrix combining versions and variants (compact output)
+          MATRIX=$(jq -nc \
             --argjson versions "$PHP_VERSIONS" \
             --argjson variants "$VARIANTS" \
             '{include: [($versions[] | . as $v | $variants[] | {php_version: $v, variant: .})]}')
