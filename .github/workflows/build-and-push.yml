@@ -243,6 +243,36 @@ jobs:
             ${{ env.DOCKERHUB_IMAGE }}:${{ matrix.php_version }}-${{ matrix.variant }}-amd64 \
             ${{ env.DOCKERHUB_IMAGE }}:${{ matrix.php_version }}-${{ matrix.variant }}-arm64
 
+      - name: Clean up platform-specific tags from GHCR
+        continue-on-error: true
+        run: |
+          # Delete platform-specific tags after manifest creation
+          for platform in amd64 arm64; do
+            curl -X DELETE \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              "https://api.github.com/user/packages/container/${IMAGE_NAME}/versions" \
+              --data "{\"names\":[\"${{ matrix.php_version }}-${{ matrix.variant }}-${platform}\"]}" \
+              2>/dev/null || true
+          done
+        env:
+          IMAGE_NAME: ${{ github.event.repository.name }}
+
+      - name: Clean up platform-specific tags from Docker Hub
+        continue-on-error: true
+        run: |
+          # Delete platform-specific tags from Docker Hub
+          for platform in amd64 arm64; do
+            TOKEN=$(curl -s -H "Content-Type: application/json" -X POST \
+              -d '{"username": "${{ secrets.DOCKERHUB_USERNAME }}", "password": "${{ secrets.DOCKERHUB_TOKEN }}"}' \
+              https://hub.docker.com/v2/users/login/ | jq -r .token)
+
+            curl -X DELETE \
+              -H "Authorization: JWT ${TOKEN}" \
+              "https://hub.docker.com/v2/repositories/${{ env.DOCKERHUB_IMAGE }}/tags/${{ matrix.php_version }}-${{ matrix.variant }}-${platform}/" \
+              2>/dev/null || true
+          done
+
   # Job to tag latest
   tag-latest:
     needs: create-manifests
