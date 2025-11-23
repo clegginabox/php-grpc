@@ -14,13 +14,30 @@ When a new PHP version is released:
        "8.2",
        "8.3",
        "8.4",
-       "8.5"  // Add new version here
+       "8.5",
+       "8.6"  // Add new version here
      ],
      ...
    }
    ```
 
 2. The GitHub Actions workflow will automatically build images for the new version.
+
+### Special Handling for PHP Versions
+
+Some PHP versions may require special handling if GRPC doesn't build with the standard method:
+
+**PHP 8.5 Example:** Currently uses a fallback build from [grpc/grpc PR #40337](https://github.com/grpc/grpc/pull/40337).
+
+The workflow automatically:
+1. First tries building with the standard `Dockerfile.template`
+2. If that fails, falls back to `Dockerfile.php85` which builds GRPC from the PR
+3. Once the PR is merged and released, the standard build will work automatically
+
+To add special handling for a new version:
+1. Create a version-specific Dockerfile (e.g., `Dockerfile.php86`)
+2. Update `.github/workflows/build-and-push.yml` to add similar conditional logic
+3. Document the special handling in README.md
 
 ## Adding New Variants
 

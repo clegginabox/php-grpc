@@ -23,6 +23,7 @@ on:
       - main
     paths:
       - 'Dockerfile.template'
+      - 'Dockerfile.php85'
       - 'versions.json'
       - '.github/workflows/build-and-push.yml'
 
@@ -113,12 +114,46 @@ jobs:
             echo "PHP image php:${{ matrix.php_version }}-${{ matrix.variant }} does not exist"
           fi
 
-      - name: Build and push Docker image
-        if: steps.check-image.outputs.exists == 'true'
+      - name: Build and push Docker image (standard)
+        if: steps.check-image.outputs.exists == 'true' && matrix.php_version != '8.5'
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile.template
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            PHP_VERSION=${{ matrix.php_version }}
+            PHP_VARIANT=${{ matrix.variant }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Try standard build for PHP 8.5
+        if: steps.check-image.outputs.exists == 'true' && matrix.php_version == '8.5'
+        id: build-standard-85
+        continue-on-error: true
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.template
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            PHP_VERSION=${{ matrix.php_version }}
+            PHP_VARIANT=${{ matrix.variant }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push PHP 8.5 with PR fix (fallback)
+        if: steps.check-image.outputs.exists == 'true' && matrix.php_version == '8.5' && steps.build-standard-85.outcome == 'failure'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.php85
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}

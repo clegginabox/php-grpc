@@ -22,6 +22,9 @@ clegginabox/php-grpc:8.2-apache
 clegginabox/php-grpc:8.3-cli
 clegginabox/php-grpc:8.3-fpm
 clegginabox/php-grpc:8.3-apache
+clegginabox/php-grpc:8.5-cli
+clegginabox/php-grpc:8.5-fpm
+clegginabox/php-grpc:8.5-apache
 ```
 
 ### GitHub Container Registry
@@ -32,6 +35,9 @@ ghcr.io/clegginabox/php-grpc:8.2-apache
 ghcr.io/clegginabox/php-grpc:8.3-cli
 ghcr.io/clegginabox/php-grpc:8.3-fpm
 ghcr.io/clegginabox/php-grpc:8.3-apache
+ghcr.io/clegginabox/php-grpc:8.5-cli
+ghcr.io/clegginabox/php-grpc:8.5-fpm
+ghcr.io/clegginabox/php-grpc:8.5-apache
 ```
 
 All images support both **linux/amd64** and **linux/arm64** platforms.
@@ -81,6 +87,9 @@ This repository automatically tracks official PHP releases and builds images for
 - PHP 8.2 (cli, fpm, apache, alpine)
 - PHP 8.3 (cli, fpm, apache, alpine)
 - PHP 8.4 (cli, fpm, apache, alpine)
+- PHP 8.5 (cli, fpm, apache, alpine) - Special handling*
+
+**PHP 8.5 Note:** GRPC doesn't currently build on PHP 8.5 using the standard method. The build system automatically tries the standard build first, and if it fails, falls back to building GRPC from [PR #40337](https://github.com/grpc/grpc/pull/40337) which includes PHP 8.5 support. Once the PR is merged and released, the standard build will work automatically.
 
 ## How It Works
 
