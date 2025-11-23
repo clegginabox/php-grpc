@@ -50,11 +50,11 @@ jobs:
           PHP_VERSIONS=$(jq -c '.php_versions' versions.json)
           VARIANTS=$(jq -c '.variants' versions.json)
 
-          # Create matrix combining versions and variants (compact output)
+          # Create matrix combining versions, variants, and platforms (compact output)
           MATRIX=$(jq -nc \
             --argjson versions "$PHP_VERSIONS" \
             --argjson variants "$VARIANTS" \
-            '{include: [($versions[] | . as $v | $variants[] | {php_version: $v, variant: .})]}')
+            '{include: [($versions[] | . as $v | $variants[] | {php_version: $v, variant: .} | . + {platform: "linux/amd64", runner: "ubuntu-latest"}), ($versions[] | . as $v | $variants[] | {php_version: $v, variant: .} | . + {platform: "linux/arm64", runner: "ubuntu-24.04-arm"})]}')
 
           echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
           echo "Generated matrix:"
@@ -63,7 +63,7 @@ jobs:
   # Job to build and push images
   build-and-push:
     needs: check-versions
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
@@ -91,6 +91,12 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Set platform suffix
+        id: platform-suffix
+        run: |
+          PLATFORM_SUFFIX=$(echo "${{ matrix.platform }}" | sed 's/linux\///')
+          echo "suffix=${PLATFORM_SUFFIX}" >> $GITHUB_OUTPUT
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -99,8 +105,7 @@ jobs:
             ${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAME }}
             ${{ env.DOCKERHUB_IMAGE }}
           tags: |
-            type=raw,value=${{ matrix.php_version }}-${{ matrix.variant }}
-            type=raw,value=${{ matrix.php_version }}-${{ matrix.variant }}-{{date 'YYYYMMDD'}}
+            type=raw,value=${{ matrix.php_version }}-${{ matrix.variant }}-${{ steps.platform-suffix.outputs.suffix }}
 
       - name: Check if PHP image exists on DockerHub
         id: check-image
@@ -120,15 +125,15 @@ jobs:
         with:
           context: .
           file: ./Dockerfile.template
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platform }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             PHP_VERSION=${{ matrix.php_version }}
             PHP_VARIANT=${{ matrix.variant }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
 
       - name: Try standard build for PHP 8.5
         if: steps.check-image.outputs.exists == 'true' && matrix.php_version == '8.5'
@@ -138,15 +143,15 @@ jobs:
         with:
           context: .
           file: ./Dockerfile.template
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platform }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             PHP_VERSION=${{ matrix.php_version }}
             PHP_VARIANT=${{ matrix.variant }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
 
       - name: Build and push PHP 8.5 with PR fix (fallback)
         if: steps.check-image.outputs.exists == 'true' && matrix.php_version == '8.5' && steps.build-standard-85.outcome == 'failure'
@@ -154,24 +159,123 @@ jobs:
         with:
           context: .
           file: ./Dockerfile.php85
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platform }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             PHP_VERSION=${{ matrix.php_version }}
             PHP_VARIANT=${{ matrix.variant }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
 
       - name: Skip - Image does not exist
         if: steps.check-image.outputs.exists == 'false'
         run: |
           echo "Skipping php:${{ matrix.php_version }}-${{ matrix.variant }} - base image not available"
 
+  # Job to generate manifest matrix
+  check-manifest-versions:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up matrix from versions.json
+        id: set-matrix
+        run: |
+          # Read versions from versions.json
+          PHP_VERSIONS=$(jq -c '.php_versions' versions.json)
+          VARIANTS=$(jq -c '.variants' versions.json)
+
+          # Create matrix combining versions and variants (compact output)
+          MATRIX=$(jq -nc \
+            --argjson versions "$PHP_VERSIONS" \
+            --argjson variants "$VARIANTS" \
+            '{include: [($versions[] | . as $v | $variants[] | {php_version: $v, variant: .})]}')
+
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+
+  # Job to create multi-platform manifests
+  create-manifests:
+    needs: check-manifest-versions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.check-manifest-versions.outputs.matrix) }}
+
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Create multi-platform manifest for GHCR
+        continue-on-error: true
+        run: |
+          docker buildx imagetools create \
+            --tag ${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.php_version }}-${{ matrix.variant }} \
+            ${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.php_version }}-${{ matrix.variant }}-amd64 \
+            ${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.php_version }}-${{ matrix.variant }}-arm64
+
+      - name: Create multi-platform manifest for Docker Hub
+        continue-on-error: true
+        run: |
+          docker buildx imagetools create \
+            --tag ${{ env.DOCKERHUB_IMAGE }}:${{ matrix.php_version }}-${{ matrix.variant }} \
+            ${{ env.DOCKERHUB_IMAGE }}:${{ matrix.php_version }}-${{ matrix.variant }}-amd64 \
+            ${{ env.DOCKERHUB_IMAGE }}:${{ matrix.php_version }}-${{ matrix.variant }}-arm64
+
+      - name: Clean up platform-specific tags from GHCR
+        continue-on-error: true
+        run: |
+          # Delete platform-specific tags after manifest creation
+          for platform in amd64 arm64; do
+            curl -X DELETE \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              "https://api.github.com/user/packages/container/${IMAGE_NAME}/versions" \
+              --data "{\"names\":[\"${{ matrix.php_version }}-${{ matrix.variant }}-${platform}\"]}" \
+              2>/dev/null || true
+          done
+        env:
+          IMAGE_NAME: ${{ github.event.repository.name }}
+
+      - name: Clean up platform-specific tags from Docker Hub
+        continue-on-error: true
+        run: |
+          # Delete platform-specific tags from Docker Hub
+          for platform in amd64 arm64; do
+            TOKEN=$(curl -s -H "Content-Type: application/json" -X POST \
+              -d '{"username": "${{ secrets.DOCKERHUB_USERNAME }}", "password": "${{ secrets.DOCKERHUB_TOKEN }}"}' \
+              https://hub.docker.com/v2/users/login/ | jq -r .token)
+
+            curl -X DELETE \
+              -H "Authorization: JWT ${TOKEN}" \
+              "https://hub.docker.com/v2/repositories/${{ env.DOCKERHUB_IMAGE }}/tags/${{ matrix.php_version }}-${{ matrix.variant }}-${platform}/" \
+              2>/dev/null || true
+          done
+
   # Job to tag latest
   tag-latest:
-    needs: build-and-push
+    needs: create-manifests
     runs-on: ubuntu-latest
     permissions:
       contents: read

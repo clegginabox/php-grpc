@@ -4,16 +4,30 @@ ARG PHP_VARIANT=cli
 # Builder stage: Compile gRPC from PR #40337 (PHP 8.5 support)
 FROM php:${PHP_VERSION}-${PHP_VARIANT} AS builder
 
-# Install build dependencies
-RUN apt-get update && apt-get install -y \
-    git \
-    cmake \
-    build-essential \
-    autoconf \
-    libtool \
-    pkg-config \
-    re2c \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+# Install build dependencies (handles both Alpine and Debian)
+RUN if [ -f /etc/alpine-release ]; then \
+        # Alpine
+        apk add --no-cache \
+            git \
+            cmake \
+            build-base \
+            autoconf \
+            libtool \
+            pkgconfig \
+            re2c \
+            linux-headers; \
+    else \
+        # Debian/Ubuntu
+        apt-get update && apt-get install -y \
+            git \
+            cmake \
+            build-essential \
+            autoconf \
+            libtool \
+            pkg-config \
+            re2c \
+        && apt-get clean && rm -rf /var/lib/apt/lists/*; \
+    fi
 
 # Download and compile gRPC with PHP 8.5 support from PR
 WORKDIR /tmp/grpc
@@ -30,7 +44,7 @@ RUN git clone --depth 1 https://github.com/grpc/grpc.git . \
        -DBUILD_SHARED_LIBS=ON \
     && make -j$(nproc) \
     && make install \
-    && ldconfig \
+    && (ldconfig 2>/dev/null || true) \
     && cd ../../src/php/ext/grpc \
     && phpize \
     && export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig \
@@ -44,8 +58,8 @@ FROM php:${PHP_VERSION}-${PHP_VARIANT}
 # Copy all shared libraries from builder
 COPY --from=builder /usr/local/lib/ /usr/local/lib/
 
-# Update linker cache
-RUN ldconfig
+# Update linker cache (works on both Alpine and Debian)
+RUN ldconfig 2>/dev/null || ldconfig /usr/local/lib 2>/dev/null || true
 
 # Install the GRPC extension
 COPY --from=builder /tmp/grpc.so /tmp/grpc.so
