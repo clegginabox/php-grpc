@@ -1,0 +1,11 @@
+ARG PHP_VERSION=8.2
+ARG PHP_VARIANT=cli
+
+FROM php:${PHP_VERSION}-${PHP_VARIANT}
+
+# Install GRPC extension using docker-php-extension-installer
+RUN ( curl -sSLf https://github.com/mlocati/docker-php-extension-installer/releases/latest/download/install-php-extensions -o - || echo 'return 1' ) | sh -s \
+    grpc
+
+# Verify GRPC is installed
+RUN php -m | grep -q grpc && echo "GRPC installed successfully" || (echo "GRPC installation failed" && exit 1)

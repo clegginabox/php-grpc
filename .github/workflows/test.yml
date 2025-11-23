@@ -1,0 +1,41 @@
+name: Test Build
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  test-build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php_version: ['8.2', '8.3']
+        variant: ['cli', 'fpm']
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.template
+          load: true
+          tags: php-grpc:test-${{ matrix.php_version }}-${{ matrix.variant }}
+          build-args: |
+            PHP_VERSION=${{ matrix.php_version }}
+            PHP_VARIANT=${{ matrix.variant }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Test GRPC installation
+        run: |
+          docker run --rm php-grpc:test-${{ matrix.php_version }}-${{ matrix.variant }} php -m | grep grpc
+          docker run --rm php-grpc:test-${{ matrix.php_version }}-${{ matrix.variant }} php --ri grpc

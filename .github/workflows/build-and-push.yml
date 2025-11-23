@@ -1,0 +1,206 @@
+name: Build and Push Docker Images
+
+on:
+  # Run daily to check for new PHP versions
+  schedule:
+    - cron: '0 2 * * *'  # 2 AM UTC daily
+
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      php_version:
+        description: 'PHP version to build (e.g., 8.2, or "all")'
+        required: false
+        default: 'all'
+      variant:
+        description: 'Variant to build (e.g., cli, fpm, apache, or "all")'
+        required: false
+        default: 'all'
+
+  # Run on push to main branch
+  push:
+    branches:
+      - main
+    paths:
+      - 'Dockerfile.template'
+      - 'Dockerfile.php85'
+      - 'versions.json'
+      - '.github/workflows/build-and-push.yml'
+
+env:
+  GHCR_REGISTRY: ghcr.io
+  DOCKERHUB_REGISTRY: docker.io
+  IMAGE_NAME: ${{ github.repository }}
+  DOCKERHUB_IMAGE: clegginabox/php-grpc
+
+jobs:
+  # Job to check for new PHP versions
+  check-versions:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up matrix
+        id: set-matrix
+        run: |
+          # Read versions from versions.json
+          PHP_VERSIONS=$(jq -c '.php_versions' versions.json)
+          VARIANTS=$(jq -c '.variants' versions.json)
+
+          # Create matrix combining versions and variants
+          MATRIX=$(jq -n \
+            --argjson versions "$PHP_VERSIONS" \
+            --argjson variants "$VARIANTS" \
+            '{include: [($versions[] | . as $v | $variants[] | {php_version: $v, variant: .})]}')
+
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+          echo "Generated matrix:"
+          echo "$MATRIX" | jq .
+
+  # Job to build and push images
+  build-and-push:
+    needs: check-versions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.check-versions.outputs.matrix) }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAME }}
+            ${{ env.DOCKERHUB_IMAGE }}
+          tags: |
+            type=raw,value=${{ matrix.php_version }}-${{ matrix.variant }}
+            type=raw,value=${{ matrix.php_version }}-${{ matrix.variant }}-{{date 'YYYYMMDD'}}
+
+      - name: Check if PHP image exists on DockerHub
+        id: check-image
+        run: |
+          # Check if the base PHP image exists
+          if docker pull php:${{ matrix.php_version }}-${{ matrix.variant }} 2>/dev/null; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "PHP image php:${{ matrix.php_version }}-${{ matrix.variant }} exists"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "PHP image php:${{ matrix.php_version }}-${{ matrix.variant }} does not exist"
+          fi
+
+      - name: Build and push Docker image (standard)
+        if: steps.check-image.outputs.exists == 'true' && matrix.php_version != '8.5'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.template
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            PHP_VERSION=${{ matrix.php_version }}
+            PHP_VARIANT=${{ matrix.variant }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Try standard build for PHP 8.5
+        if: steps.check-image.outputs.exists == 'true' && matrix.php_version == '8.5'
+        id: build-standard-85
+        continue-on-error: true
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.template
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            PHP_VERSION=${{ matrix.php_version }}
+            PHP_VARIANT=${{ matrix.variant }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push PHP 8.5 with PR fix (fallback)
+        if: steps.check-image.outputs.exists == 'true' && matrix.php_version == '8.5' && steps.build-standard-85.outcome == 'failure'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.php85
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            PHP_VERSION=${{ matrix.php_version }}
+            PHP_VARIANT=${{ matrix.variant }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Skip - Image does not exist
+        if: steps.check-image.outputs.exists == 'false'
+        run: |
+          echo "Skipping php:${{ matrix.php_version }}-${{ matrix.variant }} - base image not available"
+
+  # Job to tag latest
+  tag-latest:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Tag and push latest to GHCR
+        run: |
+          docker buildx imagetools create \
+            --tag ${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            ${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAME }}:8.3-cli
+
+      - name: Tag and push latest to Docker Hub
+        run: |
+          docker buildx imagetools create \
+            --tag ${{ env.DOCKERHUB_IMAGE }}:latest \
+            ${{ env.DOCKERHUB_IMAGE }}:8.3-cli
