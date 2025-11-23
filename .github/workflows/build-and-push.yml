@@ -174,18 +174,41 @@ jobs:
         run: |
           echo "Skipping php:${{ matrix.php_version }}-${{ matrix.variant }} - base image not available"
 
+  # Job to generate manifest matrix
+  check-manifest-versions:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up matrix from versions.json
+        id: set-matrix
+        run: |
+          # Read versions from versions.json
+          PHP_VERSIONS=$(jq -c '.php_versions' versions.json)
+          VARIANTS=$(jq -c '.variants' versions.json)
+
+          # Create matrix combining versions and variants (compact output)
+          MATRIX=$(jq -nc \
+            --argjson versions "$PHP_VERSIONS" \
+            --argjson variants "$VARIANTS" \
+            '{include: [($versions[] | . as $v | $variants[] | {php_version: $v, variant: .})]}')
+
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+
   # Job to create multi-platform manifests
   create-manifests:
-    needs: build-and-push
+    needs: check-manifest-versions
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     strategy:
       fail-fast: false
-      matrix:
-        php_version: ["8.1", "8.2", "8.3", "8.4", "8.5"]
-        variant: ["cli", "fpm", "apache", "cli-alpine", "fpm-alpine"]
+      matrix: ${{ fromJson(needs.check-manifest-versions.outputs.matrix) }}
 
     steps:
       - name: Set up Docker Buildx
