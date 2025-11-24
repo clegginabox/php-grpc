@@ -87,9 +87,9 @@ This repository automatically tracks official PHP releases and builds images for
 - PHP 8.2 (cli, fpm, apache, alpine)
 - PHP 8.3 (cli, fpm, apache, alpine)
 - PHP 8.4 (cli, fpm, apache, alpine)
-- PHP 8.5 (cli, fpm, apache, alpine) - Special handling*
+- PHP 8.5 (cli, fpm, apache) - Special handling*
 
-**PHP 8.5 Note:** GRPC doesn't currently build on PHP 8.5 using the standard method. The build system automatically tries the standard build first, and if it fails, falls back to building GRPC from [PR #40337](https://github.com/grpc/grpc/pull/40337) which includes PHP 8.5 support. Once the PR is merged and released, the standard build will work automatically.
+**PHP 8.5 Note:** GRPC doesn't currently build on PHP 8.5 using the standard method. The build system automatically tries the standard build first, and if it fails, falls back to building GRPC from [PR #40337](https://github.com/grpc/grpc/pull/40337) which includes PHP 8.5 support. **Alpine variants are not available for PHP 8.5 yet.** Once the PR is merged and released, the standard build will work automatically and Alpine support will be added.
 
 ## How It Works
 

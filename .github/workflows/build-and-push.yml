@@ -72,13 +72,22 @@ jobs:
       matrix: ${{ fromJson(needs.check-versions.outputs.matrix) }}
 
     steps:
+      - name: Skip PHP 8.5 Alpine builds
+        if: matrix.php_version == '8.5' && contains(matrix.variant, 'alpine')
+        run: |
+          echo "Skipping PHP 8.5 Alpine build - not supported yet"
+          exit 0
+
       - name: Checkout repository
+        if: "!(matrix.php_version == '8.5' && contains(matrix.variant, 'alpine'))"
         uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
+        if: "!(matrix.php_version == '8.5' && contains(matrix.variant, 'alpine'))"
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GitHub Container Registry
+        if: "!(matrix.php_version == '8.5' && contains(matrix.variant, 'alpine'))"
         uses: docker/login-action@v3
         with:
           registry: ${{ env.GHCR_REGISTRY }}
@@ -86,18 +95,21 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Log in to Docker Hub
+        if: "!(matrix.php_version == '8.5' && contains(matrix.variant, 'alpine'))"
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Set platform suffix
+        if: "!(matrix.php_version == '8.5' && contains(matrix.variant, 'alpine'))"
         id: platform-suffix
         run: |
           PLATFORM_SUFFIX=$(echo "${{ matrix.platform }}" | sed 's/linux\///')
           echo "suffix=${PLATFORM_SUFFIX}" >> $GITHUB_OUTPUT
 
       - name: Extract metadata
+        if: "!(matrix.php_version == '8.5' && contains(matrix.variant, 'alpine'))"
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -108,6 +120,7 @@ jobs:
             type=raw,value=${{ matrix.php_version }}-${{ matrix.variant }}-${{ steps.platform-suffix.outputs.suffix }}
 
       - name: Check if PHP image exists on DockerHub
+        if: "!(matrix.php_version == '8.5' && contains(matrix.variant, 'alpine'))"
         id: check-image
         run: |
           # Check if the base PHP image exists
@@ -135,8 +148,8 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.platform }}
           cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
 
-      - name: Try standard build for PHP 8.5
-        if: steps.check-image.outputs.exists == 'true' && matrix.php_version == '8.5'
+      - name: Try standard build for PHP 8.5 (non-Alpine only)
+        if: steps.check-image.outputs.exists == 'true' && matrix.php_version == '8.5' && !contains(matrix.variant, 'alpine')
         id: build-standard-85
         continue-on-error: true
         uses: docker/build-push-action@v5
@@ -153,8 +166,8 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.platform }}
           cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
 
-      - name: Build and push PHP 8.5 with PR fix (fallback)
-        if: steps.check-image.outputs.exists == 'true' && matrix.php_version == '8.5' && steps.build-standard-85.outcome == 'failure'
+      - name: Build and push PHP 8.5 with PR fix (fallback, non-Alpine only)
+        if: steps.check-image.outputs.exists == 'true' && matrix.php_version == '8.5' && !contains(matrix.variant, 'alpine') && steps.build-standard-85.outcome == 'failure'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -170,7 +183,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
 
       - name: Skip - Image does not exist
-        if: steps.check-image.outputs.exists == 'false'
+        if: steps.check-image.outputs.exists == 'false' && !(matrix.php_version == '8.5' && contains(matrix.variant, 'alpine'))
         run: |
           echo "Skipping php:${{ matrix.php_version }}-${{ matrix.variant }} - base image not available"
 
@@ -211,10 +224,18 @@ jobs:
       matrix: ${{ fromJson(needs.check-manifest-versions.outputs.matrix) }}
 
     steps:
+      - name: Skip PHP 8.5 Alpine manifests
+        if: matrix.php_version == '8.5' && contains(matrix.variant, 'alpine')
+        run: |
+          echo "Skipping PHP 8.5 Alpine manifest - no images to merge"
+          exit 0
+
       - name: Set up Docker Buildx
+        if: "!(matrix.php_version == '8.5' && contains(matrix.variant, 'alpine'))"
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GitHub Container Registry
+        if: "!(matrix.php_version == '8.5' && contains(matrix.variant, 'alpine'))"
         uses: docker/login-action@v3
         with:
           registry: ${{ env.GHCR_REGISTRY }}
@@ -222,12 +243,14 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Log in to Docker Hub
+        if: "!(matrix.php_version == '8.5' && contains(matrix.variant, 'alpine'))"
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Create multi-platform manifest for GHCR
+        if: "!(matrix.php_version == '8.5' && contains(matrix.variant, 'alpine'))"
         continue-on-error: true
         run: |
           docker buildx imagetools create \
@@ -236,6 +259,7 @@ jobs:
             ${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.php_version }}-${{ matrix.variant }}-arm64
 
       - name: Create multi-platform manifest for Docker Hub
+        if: "!(matrix.php_version == '8.5' && contains(matrix.variant, 'alpine'))"
         continue-on-error: true
         run: |
           docker buildx imagetools create \
@@ -244,6 +268,7 @@ jobs:
             ${{ env.DOCKERHUB_IMAGE }}:${{ matrix.php_version }}-${{ matrix.variant }}-arm64
 
       - name: Clean up platform-specific tags from GHCR
+        if: "!(matrix.php_version == '8.5' && contains(matrix.variant, 'alpine'))"
         continue-on-error: true
         run: |
           # Delete platform-specific tags after manifest creation
@@ -259,6 +284,7 @@ jobs:
           IMAGE_NAME: ${{ github.event.repository.name }}
 
       - name: Clean up platform-specific tags from Docker Hub
+        if: "!(matrix.php_version == '8.5' && contains(matrix.variant, 'alpine'))"
         continue-on-error: true
         run: |
           # Delete platform-specific tags from Docker Hub
