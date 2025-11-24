@@ -10,7 +10,5 @@
     "cli",
     "fpm",
     "apache",
-    "cli-alpine",
-    "fpm-alpine"
   ]
 }
