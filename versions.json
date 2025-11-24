@@ -9,6 +9,6 @@
   "variants": [
     "cli",
     "fpm",
-    "apache",
+    "apache"
   ]
 }
